@@ -11,15 +11,31 @@ author: github_K-moovie, github_SWKANG0525
 #include <signal.h>
 #include <sys/resource.h>
 #include <fcntl.h>
+pid_t pid;
 int getargs(char *cmd, char **argv);
 void launch(int narg, char **argv);
+int getargs(char *cmd, char **argv);
+void SIGINT_Handler(int signo);
+void SIGQUIT_Handler(int signo);
+void SIGQUIT_Handler(int signo) {
+    printf("\n");
+    exit(1);
+}
 
+void SIGINT_Handler(int signo)
+{   
+    if(pid == 0) {
+        printf("\n");
+        exit(1);
+    }
+}
 int main()
 {
+    signal(SIGINT, SIGINT_Handler);
+    signal(SIGTSTP, SIGQUIT_Handler);
     char buf[256];
     char *argv[50];
     int narg;
-    pid_t pid;
     int i = 0;
     while (1)
     {
@@ -36,6 +52,7 @@ int main()
         narg = getargs(buf, argv);
         launch(narg, argv);
         
+
     }
 
 }
