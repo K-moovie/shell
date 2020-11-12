@@ -14,6 +14,7 @@ author: github_K-moovie, github_SWKANG0525
 pid_t pid;
 int getargs(char *cmd, char **argv);
 void launch(int narg, char **argv);
+void redirection(int narg, char **argv);
 int getargs(char *cmd, char **argv);
 void SIGINT_Handler(int signo);
 void SIGQUIT_Handler(int signo);
@@ -34,14 +35,15 @@ int main()
     signal(SIGINT, SIGINT_Handler);
     signal(SIGTSTP, SIGQUIT_Handler);
     char buf[256];
-    char *argv[50];
+    
     int narg;
     int i = 0;
     while (1)
     {
-        for(i=0; i <50; i++){
-             argv[i] = '\0';
-        }
+        char *argv[50] = {'\0'} ;
+        //for(i=0; i <50; i++){
+        //     argv[i] = '\0';
+        //}
         printf("shell> ");
 	    gets(buf);
         //  Q1. exit 입력 시 프로그램 종료.
@@ -50,12 +52,13 @@ int main()
         }
 
         narg = getargs(buf, argv);
-        launch(narg, argv);
-        
+        //launch(narg, argv);
+        redirection(narg, argv);
 
     }
 
 }
+
 
 int getargs(char *cmd, char **argv)
 {
@@ -92,7 +95,7 @@ void launch(int narg, char **argv)
         }
 
         if(execvp(argv[0], argv) < 0) {
-            perror("BACKGROUND:");
+            perror("[ERROR] CREATE BACKGROUND: ");
         }
     }
     
@@ -100,5 +103,69 @@ void launch(int narg, char **argv)
         if(is_background == 0){
             wait(pid);
         }
+    }
+}
+
+void redirection(int narg, char **argv) {
+    pid_t pid;
+    int i = 0;
+    int fd;
+    int split_index = 0, is_write = 0;
+
+    int write_flags = O_WRONLY | O_CREAT | O_TRUNC;
+    mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
+
+    char *cmd[10] = {'\0'}; // redirection을 수행할 명령어 저장.
+
+
+    for(i = 0; i < narg; i++){
+        if(!strcmp(argv[i], ">")){
+            split_index = i;
+            is_write = 1;
+        }
+        else if(!strcmp(argv[i], "<")){
+            split_index = i;
+            is_write = 0;
+        }
+    }
+
+    for(i = 0; i < split_index; i++){
+        cmd[i] = argv[i];
+    }
+
+    pid = fork();
+    if(pid == 0) {
+        // > 연산자 
+        if (is_write){
+            if ((fd = open(argv[split_index + 1], write_flags, mode)) == -1) {
+                perror("[ERROR] OPEN: ");
+                exit(1);
+            }
+            if (dup2(fd, 1) == -1) {
+                perror("[ERROR] DUP2: ");
+                exit(1);
+            }
+        }
+        // < 연산자
+        else{
+            if ((fd = open(argv[split_index + 1], O_RDONLY)) == -1) {
+                perror("[ERROR] OPEN: ");
+                exit(1);
+            }
+            if (dup2(fd, 0) == -1) {
+                perror("[ERROR] DUP2: ");
+                exit(1);
+            }
+        }
+    
+        if (close(fd) == -1) {
+            perror("[ERROR] CLOSE: ");
+            exit(1);
+        }
+        execvp(cmd[0], cmd);
+    }
+
+    else if (pid > 0) {
+        wait(pid);
     }
 }
