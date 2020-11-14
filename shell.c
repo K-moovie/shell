@@ -68,9 +68,9 @@ int main()
 
         narg = getargs(buf, argv);
 
-        launch(narg, argv);
+        //launch(narg, argv);
         //redirection(narg, argv);
-
+        pwd();
         //launch(narg, argv);
         //redirection(narg, argv);
         //ls(narg, argv);
@@ -443,3 +443,18 @@ void mv(int narg, char **argv) {
     }
     free(target);
 }
+
+void pwd() {
+    char *buf = (char *)malloc(sizeof(char)*(BUFSIZE));
+    
+    if(getcwd(buf,BUFSIZE) == NULL) {
+        perror("[ERROR] PWD");
+        exit(EXIT_FAILURE);
+    }
+    else
+        printf("%s \n",buf);
+    
+    free(buf);
+    
+}
+
