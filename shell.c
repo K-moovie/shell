@@ -11,10 +11,18 @@ author: github_K-moovie, github_SWKANG0525
 #include <signal.h>
 #include <sys/resource.h>
 #include <fcntl.h>
+#include <sys/types.h>
+#include <dirent.h>
+
 pid_t pid;
 int getargs(char *cmd, char **argv);
 void launch(int narg, char **argv);
 void redirection(int narg, char **argv);
+void ls(int narg, char **argv);
+void cd(int narg, char **argv);
+void my_rmdir(int narg, char **argv);
+void cp(int narg, char **argv);
+void mv(int narg, char **argv);
 int getargs(char *cmd, char **argv);
 void SIGINT_Handler(int signo);
 void SIGQUIT_Handler(int signo);
@@ -53,8 +61,11 @@ int main()
 
         narg = getargs(buf, argv);
         //launch(narg, argv);
-        redirection(narg, argv);
-
+        //redirection(narg, argv);
+        //ls(narg, argv);
+        //cd(narg, argv);
+        //my_rmdir(narg,argv);
+        cp(narg, argv);
     }
 
 }
@@ -168,4 +179,141 @@ void redirection(int narg, char **argv) {
     else if (pid > 0) {
         wait(pid);
     }
+}
+
+void ls(int narg, char **argv){
+    char temp[256];
+    if(narg == 1) {
+        getcwd(temp, 256);
+        printf("%s", temp);
+        argv[1] =  temp;
+
+    }
+    DIR *pdir;
+    struct dirent *pde;
+    int i = 0;
+    if((pdir = opendir(argv[1])) < 0) {
+        perror("[ERROR] OPENDIR: ");
+    }
+    printf("\n");
+    while((pde = readdir(pdir)) != NULL) {
+        printf("%-20s", pde->d_name);
+        if(++i %3 == 0)
+            printf("\n");
+    }
+    printf("\n");
+    closedir(pdir);
+}
+
+void cd(int narg, char **argv) {
+    if(narg == 1) {
+       chdir("HOME");
+    }
+    else{
+        if(chdir(argv[1]) == -1){
+            printf("%s: No search file or directory\n", argv[1]);
+        }
+    }
+}
+
+void my_rmdir(int narg, char **argv){
+    int i = 0;
+    char temp[256];
+    if(narg == 1){
+        printf("rmdir: missing operand\n");
+    }
+    else{
+        if (rmdir(argv[1]) == -1) {
+            perror("rmdir");
+        }
+    }
+}
+
+void cp(int narg, char **argv) {
+    int src_fd; 
+    int dst_fd;
+    char buf[256];
+    ssize_t rcnt;
+    ssize_t tot_cnt = 0;
+    mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH; 
+
+    if (narg < 3){
+        fprintf(stderr, "Usage: file_copy src_file dest_file\n");
+        exit(1);
+    }
+    if ((src_fd = open(argv[1], O_RDONLY)) == -1){
+        perror("[ERROR]SRC OPEN");
+        exit(1);
+    }
+
+    if ((dst_fd = creat(argv[2], mode)) == -1){
+        perror("[ERROR]DST OPEN");
+        exit(1);
+    }
+
+    while ((rcnt = read(src_fd, buf, 256)) > 0){
+        tot_cnt += write(dst_fd, buf, rcnt);
+    }
+
+    if (rcnt < 0){
+        perror("[ERROR]READ");
+        exit(1);
+    }
+
+    close(src_fd);
+    close(dst_fd);
+}
+
+void mv(int narg, char **argv) {
+    struct stat buf;
+    char *target;
+    char *src_file_name_only;
+    if (narg < 3)
+    {
+        fprintf(stderr, "Usage: file_rename src target\n");
+        exit(1);
+    }
+    // Check argv[1] (src) whether it has directory info or not.
+    if (access(argv[1], F_OK) < 0)
+    {
+        fprintf(stderr, "%s not exists\n", argv[1]);
+        exit(1);
+    }
+    else
+    {
+        char *slash = strrchr(argv[1], '/');
+        src_file_name_only = argv[1];
+        if (slash != NULL)
+        { // argv[1] has directory info.
+            src_file_name_only = slash + 1;
+        }
+    }
+    // Make target into a file name if it is a directory
+    target = (char *)calloc(strlen(argv[2]) + 1, sizeof(char));
+    strcpy(target, argv[2]);
+    if (access(argv[2], F_OK) == 0)
+    {
+        if (lstat(argv[2], &buf) < 0)
+        {
+            perror("lstat");
+            exit(1);
+        }
+        else
+        {
+            if (S_ISDIR(buf.st_mode))
+            {
+                free(target);
+                target = (char *)calloc(strlen(argv[1]) + strlen(argv[2]) + 2, sizeof(char));
+                strcpy(target, argv[2]);
+                strcat(target, "/");
+                strcat(target, src_file_name_only);
+            }
+        }
+    }
+    printf("target = %s\n", target);
+    if (rename(argv[1], target) < 0){
+        perror("rename");
+        exit(1);
+    }
+    free(target);
 }
