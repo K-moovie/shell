@@ -14,6 +14,7 @@ author: github_K-moovie, github_SWKANG0525
 #include <fcntl.h>
 #include <sys/types.h>
 #include <dirent.h>
+#include <sys/stat.h>
 #define BUFSIZE 256
 
 
@@ -67,7 +68,7 @@ int main()
 
         narg = getargs(buf, argv);
 
-        //launch(narg, argv);
+        launch(narg, argv);
         //redirection(narg, argv);
 
         //launch(narg, argv);
@@ -75,7 +76,7 @@ int main()
         //ls(narg, argv);
         //cd(narg, argv);
         //my_rmdir(narg,argv);
-        cp(narg, argv);
+        //cp(narg, argv);
 
     }
 
