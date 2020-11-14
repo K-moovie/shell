@@ -15,10 +15,13 @@ author: github_K-moovie, github_SWKANG0525
 #include <sys/types.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <setjmp.h>
+
 #define BUFSIZE 256
-
-
+sigjmp_buf jbuf;
 pid_t pid;
+int shell_init = 0;
+void handler(int narg, char **argv);
 int getargs(char *cmd, char **argv);
 void launch(int narg, char **argv);
 void redirection(int narg, char **argv);
@@ -28,22 +31,26 @@ void my_rmdir(int narg, char **argv);
 void cp(int narg, char **argv);
 void mv(int narg, char **argv);
 int getargs(char *cmd, char **argv);
-void SIGINT_Handler(int signo);
+void SIGINT_Handler(int signo,pid_t pid);
 void SIGQUIT_Handler(int signo);
-void pipe_launch(char **argv,int narg);
+void pipe_launch(int narg, char **argv);
 char *substring(int start, int end, char * str);
 void SIGQUIT_Handler(int signo) {
     printf("\n");
     exit(1);
 }
 
-void SIGINT_Handler(int signo)
+void SIGINT_Handler(int signo,pid_t pid)
 {   
-    if(pid == 0) {
+    if (kill(pid, SIGTERM) != 0) {
         printf("\n");
-        exit(1);
     }
+
+
+
 }
+
+
 int main()
 {
     signal(SIGINT, SIGINT_Handler);
@@ -53,38 +60,90 @@ int main()
     int i = 0;
     while (1)
     {
+
         char *argv[50] = {'\0'} ;
-
-        //for(i=0; i <50; i++){
-        //     argv[i] = '\0';
-        //}
-
         printf("shell> ");
 	    gets(buf);
         //  Q1. exit 입력 시 프로그램 종료.
-        if(!strcmp(buf,"exit") || !strcmp(buf,"exit;")){
+        if(!strcmp(buf,"exit") || !strcmp(buf,"exit;"))
             break;
-        }
+        
+        else if(!strcmp(buf,"") || !strcmp(buf,"\t")) 
+            continue;
+        
 
         narg = getargs(buf, argv);
-
-        //launch(narg, argv);
-        //redirection(narg, argv);
-        //pwd();
-        //rmdir_and_rm(narg,argv);
-        //launch(narg, argv);
-        //redirection(narg, argv);
-        //ls(narg, argv);
-        //cd(narg, argv);
-        //my_rmdir(narg,argv);
-        //cp(narg, argv);
-        //my_mkdir(narg,argv);
-        //my_ln(narg,argv);
-        cat(narg,argv);
+        handler(narg, argv);
     }
 
 }
 
+void handler(int narg, char **argv) {
+    
+    int i = 0;
+    int is_background = 0, is_redirection = 0, is_pipe = 0;
+    for(i = 0; i < narg; i++) {
+        if( (!strcmp(argv[i], ">")) || (!strcmp(argv[i], "<"))) {
+            is_redirection = 1;
+            break;
+        }
+        else if (!strcmp(argv[i], "|")) {
+            is_pipe = 1;
+            break;
+        }
+        else if (!strcmp(argv[i], "&")) {
+            is_background = 1;
+            break;
+        }
+    }    
+
+    if(is_background){
+        launch(narg, argv);
+        is_background = 0;
+    }
+    else if(is_redirection){
+        redirection(narg, argv);
+        is_redirection = 0;
+    }
+    else if(is_pipe){
+        pipe_launch(narg, argv);
+        is_pipe = 0;
+    }
+    else if(!strcmp(argv[0], "ls")){
+        ls(narg, argv);
+    }
+    else if(!strcmp(argv[0], "cd")){
+        cd(narg, argv);
+    }
+    else if (!strcmp(argv[0], "rmdir")){
+        my_rmdir(narg, argv);
+    }
+    else if (!strcmp(argv[0], "cp")){
+        cp(narg, argv);
+    }
+    else if (!strcmp(argv[0], "mv")){
+        mv(narg, argv);
+    }
+    else if (!strcmp(argv[0], "pwd")){
+        pwd(narg, argv);
+    }
+    else if (!strcmp(argv[0], "rm")){
+        rmdir_and_rm(narg, argv);
+    }
+    else if (!strcmp(argv[0], "mkdir")){
+        my_mkdir(narg, argv);
+    }
+    else if (!strcmp(argv[0], "ln")){
+        my_ln(narg, argv);
+    }
+    else if (!strcmp(argv[0], "cat")){
+        cat(narg, argv);
+    }
+    else {
+        launch(narg,argv);
+    }
+
+}
 
 int getargs(char *cmd, char **argv)
 {
@@ -104,13 +163,12 @@ int getargs(char *cmd, char **argv)
     return narg;
 }
 
-void pipe_launch(char **argv,int narg) {
+void pipe_launch(int narg, char **argv) {
     int command_pos = 0;
     int count_pipe = 0;
     int i  = 0 ;
     int pd_idx = 0;
     int k = 0;
-    pid_t pid;
     int status;
 
     while(argv[command_pos] != NULL) {
@@ -202,24 +260,13 @@ void pipe_launch(char **argv,int narg) {
 
 void launch(int narg, char **argv)
 {
-    int is_pipe= 0;
-    pid_t pid = 0;
+    pid = 0;
     int i = 0;
     int is_background = 0;
     if(narg != 0 && !strcmp(argv[narg -1], "&") ){
         argv[narg-1] = NULL;
         is_background = 1;
     }
-
-    for(i = 0; i<narg; i++)
-        if(!strcmp(argv[i],"|"))
-            is_pipe = 1;    
-
-    if(is_pipe == 1)
-        pipe_launch(argv,narg);
-
-    
-    else {
     pid = fork();
     if (pid == 0){
         if(is_background){
@@ -230,12 +277,10 @@ void launch(int narg, char **argv)
             perror("[ERROR] CREATE BACKGROUND: ");
         }
     }
-    
     else {
         if(is_background == 0){
             wait(pid);
         }
-    }
     }
 }
 
@@ -247,7 +292,7 @@ char *substring(int start, int end, char * str) {
 }
 
 void redirection(int narg, char **argv) {
-    pid_t pid;
+    pid;
     int i = 0;
     int fd;
     int split_index = 0, is_write = 0;
