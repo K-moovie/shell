@@ -79,7 +79,8 @@ int main()
         //my_rmdir(narg,argv);
         //cp(narg, argv);
         //my_mkdir(narg,argv);
-        my_ln(narg,argv);
+        //my_ln(narg,argv);
+        cat(narg,argv);
     }
 
 }
@@ -532,3 +533,34 @@ void my_ln(int narg, char ** argv) {
         fprintf(stderr, "Unknown command...\n");
     }
 } 
+
+void cat(int narg, char ** argv) {
+    FILE *file[narg-1];
+    int loop;
+    char buf;
+    if (narg < 1) {
+        fprintf(stderr, "Please Input Files \n");
+        exit(1);
+    }
+
+    for(loop = 0; loop<narg-1; loop++) {
+        file[loop] = fopen(argv[loop+1],"r");
+        if(file[loop] == NULL) {
+            printf("cat : %s : No such file or directory \n",argv[loop+1]);
+        }
+        else {
+            while((buf = fgetc(file[loop])) != EOF) {
+                printf("%c",buf);
+            }
+        
+            if((fclose(file[loop])) != 0)
+            {
+                perror("CAT");
+            }
+        }
+
+    }
+
+    printf("\n");
+
+}
