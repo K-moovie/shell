@@ -1,301 +1,538 @@
-#include <errno.h> // error management
-#include <stdio.h> // standard I/O
-#include <stdlib.h> // String casting, random, dynamic memory
-#include <string.h> // String data type management
-#include <unistd.h> // standard symbolic const and data type, processing command in shell
-#include <sys/wait.h> // wait for process 
-#include <sys/types.h> // use for thread type or process type
-#include <fcntl.h> // file I/O & file remove, amend
-#include <dirent.h> // management lib for directory
-#include <signal.h> // management lib for specific process shutdown , or user interupt
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <sys/types.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+#include <termios.h>
+#include "util.h"
 
+#define LIMIT 256	// 명령에 대한 최대 토큰 수
+#define MAXLINE 1024 // 사용자 입력의 최대 문자 수
 
-
-#define MAX_CMD_ARG 	10
-#define MAX_CMD_LIST 	10
-#define MAX_CMD_GRP	10
-
-#ifndef TRUE
-#define TRUE	1
-#endif
-
-#ifndef FALSE
-#define FALSE	0
-#endif
-
-const char *prompt = "dongshim_sh"; // shell name
-
-char* cmdgrp[MAX_CMD_GRP];
-char* cmdlist[MAX_CMD_LIST];
-char* cmdargs[MAX_CMD_ARG];
-char cmdline[BUFSIZ];
-
-void fatal(char *str); // management fatal error
-void parse_redirect(char* cmd); // redirection
-void execute_cmd(char *cmdlist); // uses command
-void execute_cmdline(char* cmdline); // uses command
-void execute_cmdgrp(char* cmdgrp); 
-void zombie_handler(int signo); // handling zombie process
-
-int makeargv(char *s, const char *delimiters, char** argvp, int MAX_LIST); // mkdir
-
-
-struct sigaction act;
-static int status;
-static int IS_BACKGROUND=0;
-
-typedef struct { // 커맨드 구조체
-    char* name;
-    char* desc;
-    int ( *func )( int argc, char* argv[] ); // 함수포인터. 사용할 함수들의 매개변수를 맞춰줌
-} COMMAND;
-
-int cmd_cd( int argc, char* argv[] ){ //cd : change directory
-    if( argc == 1 )
-        chdir( getenv( "HOME" ) );
-    else if( argc == 2 ){
-        if( chdir( argv[1] ) )
-            printf( "No directory\n" );
-    }
-    else
-        printf( "USAGE: cd [dir]\n" );
-
-    return TRUE;
-}
-
-int cmd_exit( int argc, char* argv[] ){
-    printf("shut down shell...\n");
-    printf("------------------------\n");
-    exit(0);
-
-    return TRUE;
-}
-
-static COMMAND builtin_cmds[] = // costomized commands which unsupplied commands in unistd.h 
+void init()
 {
-    { "cd", "change directory", cmd_cd },
-    { "exit", "exit this shell", cmd_exit },
-    { "quit", "quit this shell", cmd_exit },
+	
+	GBSH_PID = getpid();
 
-};
+	GBSH_IS_INTERACTIVE = isatty(STDIN_FILENO);
 
+	if (GBSH_IS_INTERACTIVE)
+	{
+	
+		while (tcgetpgrp(STDIN_FILENO) != (GBSH_PGID = getpgrp()))
+			kill(GBSH_PID, SIGTTIN);
 
+		
+		act_child.sa_handler = signalHandler_child;
+		act_int.sa_handler = signalHandler_int;
 
+		sigaction(SIGCHLD, &act_child, 0);
+		sigaction(SIGINT, &act_int, 0);
 
-int main(int argc, char**argv)
+		setpgid(GBSH_PID, GBSH_PID); 
+		GBSH_PGID = getpgrp();
+		if (GBSH_PID != GBSH_PGID)
+		{
+			printf("Error, the shell is not process group leader");
+			exit(EXIT_FAILURE);
+		}
+		// 터미널 제어
+		tcsetpgrp(STDIN_FILENO, GBSH_PGID);
+
+		// 쉘의 기본 터미널 속성 저장
+		tcgetattr(STDIN_FILENO, &GBSH_TMODES);
+
+		currentDirectory = (char *)calloc(1024, sizeof(char));
+	}
+	else
+	{
+		printf("Could not make the shell interactive.\n");
+		exit(EXIT_FAILURE);
+	}
+}
+
+/**
+ * 쉘 시작시 생성되는 코멘트.
+ */
+void welcomeScreen()
 {
-    int i;
-    sigset_t set;
-
-    sigfillset(&set);
-    sigdelset(&set,SIGCHLD);
-    sigprocmask(SIG_SETMASK,&set,NULL);
-
-    act.sa_flags = SA_RESTART;
-    sigemptyset(&act.sa_mask);
-    act.sa_handler = zombie_handler;
-    sigaction(SIGCHLD, &act, 0);
-
-    while (1) {
-        fputs(prompt, stdout);
-        printf( "[%s] $>>> ", get_current_dir_name() ); // command line interface that print curren directory
-        fgets(cmdline, BUFSIZ, stdin); // read command line on current directory with standard input for buffer size
-        cmdline[ strlen(cmdline) -1] ='\0'; // remove null charactor 
-        execute_cmdline(cmdline);
-    }
-    return 0;
+	printf("\n\t============================================\n");
+	printf("\t                 Welcome!\n");
+	printf("\n");
+	printf("\t               SungHo Shell\n");
+	printf("\t============================================\n");
+	printf("\n\n");
 }
 
-void zombie_handler(int signo)
-{//management zombie processes that didnt shutdown by gracefully or didnt shutdown
-    pid_t pid ;
-    int stat ;
+/**
+ * 시그널 핸들러
+ */
 
-    while ((pid = waitpid(-1, &stat, WNOHANG)) > 0)
-        printf("child %d terminated normaly\n", pid) ;
-    }// shut down child process dosent have parant process
-
-void fatal(char *str)
+/**
+ * SIGCHLD를 위한 시그널 핸들러
+ */
+void signalHandler_child(int p)
 {
-    perror(str);
-    exit(1);
+	
+	while (waitpid(-1, NULL, WNOHANG) > 0)
+	{
+	}
+	printf("\n");
 }
 
-int makeargv(char *s, const char *delimiters, char** argvp, int MAX_LIST)
+/**
+ * SIGINT를 위한 시그널 핸들러
+ */
+void signalHandler_int(int p)
 {
-    int i = 0;
-    int numtokens = 0;
-    char *snew = NULL;
-
-    if( (s==NULL) || (delimiters==NULL) )
-    {
-        return -1;
-    }
-
-    snew = s+strspn(s, delimiters);
-
-    argvp[numtokens]=strtok(snew, delimiters);
-
-    if( argvp[numtokens] !=NULL)
-        for(numtokens=1; (argvp[numtokens]=strtok(NULL, delimiters)) != NULL; numtokens++)
-        {
-            if(numtokens == (MAX_LIST-1)) return -1;
-        }
-
-    if( numtokens > MAX_LIST) return -1;
-
-    return numtokens;
+	if (kill(pid, SIGTERM) == 0)
+	{
+		printf("\n프로세스 %d 는 SIGINT 시그널을 받았습니다.\n", pid);
+		no_reprint_prmpt = 1;
+	}
+	else
+	{
+		printf("\n");
+	}
 }
 
-void parse_redirect(char* cmd) // redirection function
+/**
+ *	"<user>@<host> <cwd>> 형식으로 프롬프트를 출력"
+ */
+void shellPrompt()
 {
-    char *arg;
-    int cmdlen = strlen(cmd);
-    int fd, i;
 
-    for(i = cmdlen-1;i >= 0;i--)
-    {
-        switch(cmd[i])
-        {
-            case '<':
-                arg = strtok(&cmd[i+1], " \t");
-                if( (fd = open(arg, O_RDONLY | O_CREAT, 0644)) < 0) //make file readonly. also set permission 0644.
-                    fatal("file open error");
-                dup2(fd, STDIN_FILENO);
-                close(fd);
-                cmd[i] = '\0';
-                break;
-            case '>':
-                arg = strtok(&cmd[i+1], " \t");
-                if( (fd = open(arg, O_WRONLY | O_CREAT | O_TRUNC, 0644)) < 0)//make file writeonly. also set permission 0644.
-                    fatal("file open error");
-                dup2(fd, STDOUT_FILENO);
-                close(fd);
-                cmd[i] = '\0';
-                break;
-            default:break;
-        }
-    }
-
+	char hostn[1204] = "";
+	gethostname(hostn, sizeof(hostn));
+	printf("%s@%s %s > ", getenv("LOGNAME"), hostn, getcwd(currentDirectory, 1024));
 }
 
-int parse_background(char *cmd) // running background that user commanded
+/**
+ * 디렉토리 변경
+ */
+int changeDirectory(char *args[])
 {
-    int i;
 
-    for(i=0; i < strlen(cmd); i++)
-        if(cmd[i] == '&')
-        {
-            cmd[i] = ' ';
-            return 1;
-        }
+	if (args[1] == NULL)
+	{
+		chdir(getenv("HOME"));
+		return 1;
+	}
 
-
-    return 0;
+	else
+	{
+		if (chdir(args[1]) == -1)
+		{
+			printf(" %s: 해당 디렉토리가 존재하지 않음.\n", args[1]);
+			return -1;
+		}
+	}
+	return 0;
 }
 
-void execute_cmd(char *cmdlist)
+/**
+* 프로그램을 시작하는 방법. 백그라운드에서 계속 실행됨.
+*/
+void launchProg(char **args, int background)
 {
-    parse_redirect(cmdlist);
+	int err = -1;
 
-    if(makeargv(cmdlist, " \t", cmdargs, MAX_CMD_ARG) <= 0)
-        fatal("makeargv_cmdargs error");
+	if ((pid = fork()) == -1)
+	{
+		printf("자식 프로세스를 만들 수 없습니다.\n");
+		return;
+	}
 
-    execvp(cmdargs[0], cmdargs);
-    fatal("exec error");
+	if (pid == 0)
+	{
+		signal(SIGINT, SIG_IGN);
+
+		setenv("parent", getcwd(currentDirectory, 1024), 1);
+
+		// 존재하지 않는 명령을 실행시, 프로세스 종료.
+		if (execvp(args[0], args) == err)
+		{
+			printf(" 해당 명령을 찾을 수 없습니다.");
+			kill(getpid(), SIGTERM);
+		}
+	}
+
+	if (background == 0)
+	{
+		waitpid(pid, NULL, 0);
+	}
+	else
+	{
+		printf("Process created with PID: %d\n", pid);
+	}
 }
 
-void execute_cmdgrp(char *cmdgrp) // use for grep command
+/**
+* 입출력 리디렉션 관리.
+*/
+void fileIO(char *args[], char *inputFile, char *outputFile, int option)
 {
-    int i=0;
-    int count = 0;
-    int pfd[2];
-    sigset_t set;
 
-    setpgid(0,0);
-    if(!IS_BACKGROUND)
-        tcsetpgrp(STDIN_FILENO, getpid());
+	int err = -1;
 
-    sigfillset(&set);
-    sigprocmask(SIG_UNBLOCK,&set,NULL);
+	int fileDescriptor; 
+	// 출력 또는 입력 파일을 설명 (0~19)
 
-    if((count = makeargv(cmdgrp, "|", cmdlist, MAX_CMD_LIST)) <= 0)
-        fatal("makeargv_cmdgrp error");
+	if ((pid = fork()) == -1)
+	{
+		printf("자식 프로세스를 만들 수 없습니다.\n");
+		return;
+	}
+	if (pid == 0)
+	{
+		// 옵션 0: 출력 리디렉션
+		if (option == 0)
+		{
+			// 쓰기 전용으로 열기
+			fileDescriptor = open(outputFile, O_CREAT | O_TRUNC | O_WRONLY, 0600);
+			dup2(fileDescriptor, STDOUT_FILENO);
+			close(fileDescriptor);
+			// Option 1: 입력 및 출력 리디렉션
+		}
+		else if (option == 1)
+		{
+			// 읽기 전용으로 열기
+			fileDescriptor = open(inputFile, O_RDONLY, 0600);
+			dup2(fileDescriptor, STDIN_FILENO);
+			close(fileDescriptor);
 
-    for(i=0; i<count-1; i++)
-    {
-        pipe(pfd);
-        switch(fork())
-        {
-            case -1: fatal("fork error");
-            case  0: close(pfd[0]);
-                     dup2(pfd[1], STDOUT_FILENO);
-                     execute_cmd(cmdlist[i]);
-            default: close(pfd[1]);
-                     dup2(pfd[0], STDIN_FILENO);
-        }
-    }
-    execute_cmd(cmdlist[i]);
+			fileDescriptor = open(outputFile, O_CREAT | O_TRUNC | O_WRONLY, 0600);
+			dup2(fileDescriptor, STDOUT_FILENO);
+			close(fileDescriptor);
+		}
 
+		setenv("parent", getcwd(currentDirectory, 1024), 1);
+
+		if (execvp(args[0], args) == err)
+		{
+			printf("err");
+			kill(getpid(), SIGTERM);
+		}
+	}
+	waitpid(pid, NULL, 0);
 }
 
-void execute_cmdline(char* cmdline)
+/**
+* 파이프 사용.
+*/
+void pipeHandler(char *args[])
 {
-    int count = 0;
-    int i=0, j=0, pid;
-    char* cmdvector[MAX_CMD_ARG];
-    char cmdgrptemp[BUFSIZ];
-    int numtokens = 0;
+	
+	int filedes[2]; 
+	int filedes2[2];
 
-    count = makeargv(cmdline, ";", cmdgrp, MAX_CMD_GRP);
+	int num_cmds = 0;
 
-    for(i=0; i<count; ++i)
-    {
-        memcpy(cmdgrptemp, cmdgrp[i], strlen(cmdgrp[i]) + 1);
-        numtokens = makeargv(cmdgrp[i], " \t", cmdvector, MAX_CMD_GRP);
+	char *command[256];
 
-        for( j = 0; j < sizeof( builtin_cmds ) / sizeof( COMMAND ); j++ ){            if( strcmp( builtin_cmds[j].name, cmdvector[0] ) == 0 ){
-            builtin_cmds[j].func( numtokens , cmdvector );
-            return;
-        }
-        }
+	pid_t pid;
 
-        IS_BACKGROUND = parse_background(cmdgrptemp);
+	int err = -1;
+	int end = 0;
 
-        switch(pid=fork())
-        {
-            case -1:
-                fatal("fork error");
-            case  0:
-                execute_cmdgrp(cmdgrptemp);
-            default:
-                if(IS_BACKGROUND) break;
-                waitpid(pid, NULL, 0);
-                tcsetpgrp(STDIN_FILENO, getpgid(0));
-                fflush(stdout);
-        }
-    }
+	// 다른 루프에 사용되는 변수
+	int i = 0;
+	int j = 0;
+	int k = 0;
+	int l = 0;
 
+	// 명령 수를 계산.
+	while (args[l] != NULL)
+	{
+		if (strcmp(args[l], "|") == 0)
+		{
+			num_cmds++;
+		}
+		l++;
+	}
+	num_cmds++;
+
+	
+	while (args[j] != NULL && end != 1)
+	{
+		k = 0;
+		
+		while (strcmp(args[j], "|") != 0)
+		{
+			command[k] = args[j];
+			j++;
+			if (args[j] == NULL)
+			{
+				end = 1;
+				k++;
+				break;
+			}
+			k++;
+		}
+		
+		command[k] = NULL;
+		j++;
+
+		if (i % 2 != 0)
+		{
+			pipe(filedes); 
+		}
+		else
+		{
+			pipe(filedes2); 
+		}
+
+		pid = fork();
+
+		if (pid == -1)
+		{
+			if (i != num_cmds - 1)
+			{
+				if (i % 2 != 0)
+				{
+					close(filedes[1]); 
+				}
+				else
+				{
+					close(filedes2[1]); 
+				}
+			}
+			printf("자식 프로세스를 만들 수 없습니다.\n");
+			return;
+		}
+		if (pid == 0)
+		{
+			
+			if (i == 0)
+			{
+				dup2(filedes2[1], STDOUT_FILENO);
+			}
+
+			else if (i == num_cmds - 1)
+			{
+				if (num_cmds % 2 != 0)
+				{ 
+					dup2(filedes[0], STDIN_FILENO);
+				}
+				else
+				{ 
+					dup2(filedes2[0], STDIN_FILENO);
+				}
+			}
+			else
+			{ 
+				if (i % 2 != 0)
+				{
+					dup2(filedes2[0], STDIN_FILENO);
+					dup2(filedes[1], STDOUT_FILENO);
+				}
+				else
+				{ 
+					dup2(filedes[0], STDIN_FILENO);
+					dup2(filedes2[1], STDOUT_FILENO);
+				}
+			}
+
+			if (execvp(command[0], command) == err)
+			{
+				kill(getpid(), SIGTERM);
+			}
+		}
+
+		
+		if (i == 0)
+		{
+			close(filedes2[1]);
+		}
+		else if (i == num_cmds - 1)
+		{
+			if (num_cmds % 2 != 0)
+			{
+				close(filedes[0]);
+			}
+			else
+			{
+				close(filedes2[0]);
+			}
+		}
+		else
+		{
+			if (i % 2 != 0)
+			{
+				close(filedes2[0]);
+				close(filedes[1]);
+			}
+			else
+			{
+				close(filedes[0]);
+				close(filedes2[1]);
+			}
+		}
+
+		waitpid(pid, NULL, 0);
+
+		i++;
+	}
 }
-int SetSignal(struct sigaction *def, sigset_t *mask, void(*handler)(int)) { //시그널 설정
-// set signal to use ctrl + c / ctrl +z
-    struct sigaction catch;
 
+/**
+* 표준입력을 통해 입력된 명령을 처리
+*/
+int commandHandler(char *args[])
+{
+	int i = 0;
+	int j = 0;
 
+	int fileDescriptor;
+	int standardOut;
 
-    catch.sa_handler = handler;
+	int aux;
+	int background = 0;
 
-    def->sa_handler = SIG_DFL;
+	char *args_aux[256];
 
-    catch.sa_flags = 0;
+	while (args[j] != NULL)
+	{
+		if ((strcmp(args[j], ">") == 0) || (strcmp(args[j], "<") == 0) || (strcmp(args[j], "&") == 0))
+		{
+			break;
+		}
+		args_aux[j] = args[j];
+		j++;
+	}
 
-    def->sa_flags = 0;
+	// 'exit' 입력시, 쉘을 종료함.
+	if (strcmp(args[0], "exit") == 0)
+		exit(0);
+	// 'pwd' 입력시, 현재 디렉토리를 출력함.
+	else if (strcmp(args[0], "pwd") == 0)
+	{
+		if (args[j] != NULL)
+		{
 
-    if ((sigemptyset(&(def->sa_mask)) == -1) || (sigemptyset(&(catch.sa_mask)) == -1) || (sigaddset(&(catch.sa_mask), SIGINT) == -1) || (sigaddset(&(catch.sa_mask), SIGQUIT) == -1) || (sigaction(SIGINT, &catch, NULL) == -1) || (sigaction(SIGQUIT, &catch, NULL) == -1) || (sigemptyset(mask) == -1) || (sigaddset(mask, SIGINT) == -1) || (sigaddset(mask, SIGQUIT) == -1))
+			if ((strcmp(args[j], ">") == 0) && (args[j + 1] != NULL))
+			{
+				fileDescriptor = open(args[j + 1], O_CREAT | O_TRUNC | O_WRONLY, 0600);
 
-        return -1;
+				standardOut = dup(STDOUT_FILENO);
+				dup2(fileDescriptor, STDOUT_FILENO);
+				close(fileDescriptor);
+				printf("%s\n", getcwd(currentDirectory, 1024));
+				dup2(standardOut, STDOUT_FILENO);
+			}
+		}
+		else
+		{
+			printf("%s\n", getcwd(currentDirectory, 1024));
+		}
+	}
+	// 'clear' 입력시, 화면을 지움.
+	else if (strcmp(args[0], "clear") == 0)
+		system("clear");
+	// 'cd' 입력시, 디렉토리를 변경함.
+	else if (strcmp(args[0], "cd") == 0)
+		changeDirectory(args);
 
-    return 0;
+	else
+	{
 
+		// '&' 입력시, 명령을 백그라운드로 전환.
+		while (args[i] != NULL && background == 0)
+		{
+			if (strcmp(args[i], "&") == 0)
+			{
+				background = 1;
+				// '|' 입력시, 파이프 명령을 수행.
+			}
+			else if (strcmp(args[i], "|") == 0)
+			{
+				pipeHandler(args);
+				return 1;
+				// '<' 입력시, 입 출력 리디렉션 수행
+			}
+			else if (strcmp(args[i], "<") == 0)
+			{
+				aux = i + 1;
+				if (args[aux] == NULL || args[aux + 1] == NULL || args[aux + 2] == NULL)
+				{
+					printf(" 입력 인수가 충분하지 않음.\n");
+					return -1;
+				}
+				else
+				{
+					if (strcmp(args[aux + 1], ">") != 0)
+					{
+						printf("Usage: Expected '>' and found %s\n", args[aux + 1]);
+						return -2;
+					}
+				}
+				fileIO(args_aux, args[i + 1], args[i + 3], 1);
+				return 1;
+			}
+
+			// '>' 입력시, 출력 리디렉션 수행
+			else if (strcmp(args[i], ">") == 0)
+			{
+				if (args[i + 1] == NULL)
+				{
+					printf(" 입력 인수가 충분하지 않음.\n");
+					return -1;
+				}
+				fileIO(args_aux, NULL, args[i + 1], 0);
+				return 1;
+			}
+			i++;
+		}
+		args_aux[i] = NULL;
+		launchProg(args_aux, background);
+	}
+	return 1;
 }
 
+/**
+* 메인 쉘 부분
+*/
+int main(int argc, char *argv[], char **envp)
+{
+	char line[MAXLINE];  // 사용자 입력을 위한 버퍼
+	char *tokens[LIMIT]; // 명령에서 다른 토큰에 대한 배열
+	int numTokens;
+
+	no_reprint_prmpt = 0; 
+	pid = -10;			 
+
+	// 초기화 방법과 시작 화면을 호출.
+	init();
+	welcomeScreen();
+
+//	environ = envp;
+
+//	setenv("shell", getcwd(currentDirectory, 1024), 1);
+
+	while (TRUE)
+	{
+		if (no_reprint_prmpt == 0)
+			shellPrompt();
+		no_reprint_prmpt = 0;
+
+		memset(line, '\0', MAXLINE);
+
+		// 사용자 입력을 기다림.
+		fgets(line, MAXLINE, stdin);
+
+		// 아무것도 쓰지 않을 시, 루프가 실행.
+		if ((tokens[0] = strtok(line, " \n\t")) == NULL)
+			continue;
+
+		numTokens = 1;
+		while ((tokens[numTokens] = strtok(NULL, " \n\t")) != NULL)
+			numTokens++;
+
+		commandHandler(tokens);
+	}
+
+	exit(0);
+}
