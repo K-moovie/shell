@@ -20,7 +20,7 @@ author: github_K-moovie, github_SWKANG0525
 #define BUFSIZE 256
 sigjmp_buf jbuf;
 pid_t pid;
-int shell_init = 0;
+
 void handler(int narg, char **argv);
 int getargs(char *cmd, char **argv);
 void launch(int narg, char **argv);
