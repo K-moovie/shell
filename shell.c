@@ -71,13 +71,14 @@ int main()
         //launch(narg, argv);
         //redirection(narg, argv);
         //pwd();
-        rmdir_and_rm(narg,argv);
+        //rmdir_and_rm(narg,argv);
         //launch(narg, argv);
         //redirection(narg, argv);
         //ls(narg, argv);
         //cd(narg, argv);
         //my_rmdir(narg,argv);
         //cp(narg, argv);
+        my_mkdir(narg,argv);
 
     }
 
@@ -466,6 +467,20 @@ void rmdir_and_rm(int narg, char ** argv) {
     else {
         if(remove(argv[1]) < 0) {
             perror("[ERROR] RM/RMDIR");
+            exit(EXIT_FAILURE);
+        }
+    }
+}
+
+void my_mkdir(int narg, char ** argv) {
+    umask(0);
+    if(argv)
+
+    if(narg < 2)
+        fprintf(stderr, "PathName is not exists\n");
+    else {
+        if(mkdir(argv[1],umask(0)) < 0) {
+            perror("[ERROR] MKDIR");
             exit(EXIT_FAILURE);
         }
     }
