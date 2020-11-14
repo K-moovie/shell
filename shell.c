@@ -78,8 +78,8 @@ int main()
         //cd(narg, argv);
         //my_rmdir(narg,argv);
         //cp(narg, argv);
-        my_mkdir(narg,argv);
-
+        //my_mkdir(narg,argv);
+        my_ln(narg,argv);
     }
 
 }
@@ -486,3 +486,49 @@ void my_mkdir(int narg, char ** argv) {
     }
 }
 
+void my_ln(int narg, char ** argv) {
+    char cmd;
+    char *src;  
+    char *target;
+    if (narg < 2) {
+        fprintf(stderr, "Usage: ln [u,s] ...\n");
+        fprintf(stderr, " ln src target\n");
+        fprintf(stderr, " ln u[nlink] filename\n");
+        fprintf(stderr, " ln s[ymlink] src target\n");
+        exit(1);
+    }
+
+    
+    if (!strcmp(argv[1],"-s")) {
+        if (narg < 4) {
+            fprintf(stderr, "ln l src target [link]\n");
+            exit(1);
+        }
+        src = argv[2];
+        target = argv[3]; 
+        if (symlink(src, target) < 0) {
+            perror("symlink");
+            exit(1);
+            
+        }
+    }
+    else if (!strcmp(argv[1],"-u")) {
+        src = argv[2];
+        if (unlink(src) < 0) {
+            perror("unlink");
+            exit(1);
+        }
+    }
+
+    else if (narg == 3) {
+        src = argv[1];
+        target = argv[2];
+        if (link(src, target) < 0) {
+            perror("link");
+            exit(1);
+        }
+    }
+    else {
+        fprintf(stderr, "Unknown command...\n");
+    }
+} 
